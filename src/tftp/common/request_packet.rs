@@ -1,46 +1,199 @@
-use crate::tftp::common::{OP_RRQ, Packet, TFTPPacket};
-use crate::tftp::common::OP_LEN;
+use std::io::Write;
+use std::str;
 
-#[derive(Debug)]
-pub struct RequestPacket<'a> {
-    filename: &'a str,
-    mode: &'a str,
-    op: u16,
+use byteorder::NetworkEndian;
+
+use crate::tftp::common::{Deserializable, OP_LEN, Serializable, TFTPPacket, TFTPParseError, OP_RRQ, OP_WRQ};
+
+use super::byteorder::{ByteOrder, WriteBytesExt};
+
+pub trait Request: Serializable + Deserializable {
+    fn op(&self) -> u16;
+    fn filename(&self) -> &str;
+    fn mode(&self) -> &str;
 }
 
-impl<'a> RequestPacket<'a> {
-    pub fn new(op: u16, filename: &'a str, mode: &'a str) -> Self {
-        RequestPacket {
-            op,
-            filename,
-            mode,
+#[derive(Debug, Eq, PartialEq)]
+pub struct ReadRequestPacket {
+    req: RequestPacket
+}
+
+impl ReadRequestPacket {
+    pub fn new(filename: &str, mode: &str) -> ReadRequestPacket {
+        ReadRequestPacket {
+            req: RequestPacket::new(OP_RRQ, filename, mode)
         }
     }
 }
 
-impl<'a> Packet for RequestPacket<'a> {
-    fn into_bytes(self) -> Vec<u8> {
+impl Request for ReadRequestPacket {
+    fn op(&self) -> u16 {
+        self.req.op
+    }
+
+    fn filename(&self) -> &str {
+        &self.req.filename
+    }
+
+    fn mode(&self) -> &str {
+        &self.req.mode
+    }
+}
+
+impl Serializable for ReadRequestPacket {
+    fn serialize(self) -> Vec<u8> {
+        self.req.serialize()
+    }
+}
+
+impl Deserializable for ReadRequestPacket {
+    fn deserialize(buf: &Vec<u8>) -> Result<TFTPPacket, TFTPParseError> {
+        RequestPacket::deserialize(buf)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct WriteRequestPacket {
+    req: RequestPacket
+}
+
+impl WriteRequestPacket {
+    pub fn new(filename: &str, mode: &str) -> WriteRequestPacket {
+        WriteRequestPacket {
+            req: RequestPacket::new(OP_WRQ, filename, mode)
+        }
+    }
+}
+
+impl Request for WriteRequestPacket {
+    fn op(&self) -> u16 {
+        self.req.op
+    }
+
+    fn filename(&self) -> &str {
+        &self.req.filename
+    }
+
+    fn mode(&self) -> &str {
+        &self.req.mode
+    }
+}
+
+impl Serializable for WriteRequestPacket {
+    fn serialize(self) -> Vec<u8> {
+        self.req.serialize()
+    }
+}
+
+impl Deserializable for WriteRequestPacket {
+    fn deserialize(buf: &Vec<u8>) -> Result<TFTPPacket, TFTPParseError> {
+        RequestPacket::deserialize(buf)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct RequestPacket {
+    op: u16,
+    filename: String,
+    mode: String,
+}
+
+impl RequestPacket {
+    fn new(op: u16, filename: &str, mode: &str) -> Self {
+        RequestPacket {
+            op,
+            filename: String::from(filename),
+            mode: String::from(mode),
+        }
+    }
+}
+
+impl Serializable for RequestPacket {
+    fn serialize(self) -> Vec<u8> {
         let length =
             OP_LEN +
                 self.filename.len() +
                 self.mode.len();
         let mut buf = Vec::with_capacity(length);
-        self.serialize_op(&mut buf);
-        buf.append(&mut Vec::from(self.filename.as_bytes()));
-        buf.push(0);
-        buf.append(&mut Vec::from(self.mode.as_bytes()));
-        buf.push(0);
+        // self.serialize_op(&mut buf);
+
+        buf.write_u16::<NetworkEndian>(self.op).unwrap();
+        buf.write_all(self.filename.as_bytes()).unwrap();
+        buf.write_u8(0).unwrap();
+        buf.write_all(self.mode.as_bytes()).unwrap();
+        buf.write_u8(0).unwrap();
         buf
     }
 }
 
-impl<'a> TFTPPacket for RequestPacket<'a> {
-    fn op(&self) -> u16 {
-        return self.op;
+impl Deserializable for RequestPacket {
+    fn deserialize(buf: &Vec<u8>) -> Result<TFTPPacket, TFTPParseError> {
+        // TODO: add options
+
+        let op: u16 = NetworkEndian::read_u16(&buf[0..2]);
+        if ![OP_RRQ, OP_WRQ].contains(&op) {
+            return Err(TFTPParseError::new("Bad OP code!"));
+        }
+
+        let buf = &buf[2..];
+        let mut data: Vec<&str> = buf
+            .split(|&byte| byte == 0)
+            .map(|item| str::from_utf8(item).unwrap())
+            .filter(|s| s.len() != 0)
+            .collect();
+
+        let filename = data.remove(0);
+        let mode = data.remove(0);
+
+        let packet = match op {
+            OP_RRQ => TFTPPacket::RRQ(ReadRequestPacket::new(filename, mode)),
+            OP_WRQ => TFTPPacket::WRQ(WriteRequestPacket::new(filename, mode)),
+            _ => panic!("Invalid op code.")
+        };
+
+        Ok(packet)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tftp::common::{Deserializable, OP_RRQ, OP_WRQ, Serializable, TFTPPacket, TFTPParseError};
+    use crate::tftp::common::request_packet::{Request, RequestPacket};
+
+    const FILE_NAME: &str = "a.txt";
+    const MODE: &str = "octet";
+
+    #[test]
+    fn serialize_rrq() {
+        let p = RequestPacket::new(OP_RRQ, FILE_NAME, MODE);
+        let bytes: Vec<u8> = vec![0x0, 0x1, 0x61, 0x2E, 0x74, 0x78, 0x74, 0x0, 0x6F, 0x63, 0x74, 0x65, 0x74, 0x0];
+        assert_eq!(bytes, p.serialize());
     }
 
-    fn serialize_op(&self, buf: &mut Vec<u8>) {
-        buf.push((self.op() & 0xFF00) as u8);
-        buf.push((self.op() & 0x00FF) as u8);
+    #[test]
+    fn serialize_wrq() {
+        let p = RequestPacket::new(OP_WRQ, FILE_NAME, MODE);
+        let bytes: Vec<u8> = vec![0x0, 0x2, 0x61, 0x2E, 0x74, 0x78, 0x74, 0x0, 0x6F, 0x63, 0x74, 0x65, 0x74, 0x0];
+        assert_eq!(bytes, p.serialize());
+    }
+
+    #[test]
+    fn deserialize_rrq() {
+        let mut bytes: Vec<u8> = vec![0x0, 0x1, 0x61, 0x2E, 0x74, 0x78, 0x74, 0x0, 0x6F, 0x63, 0x74, 0x65, 0x74, 0x0];
+
+        if let TFTPPacket::RRQ(p) = RequestPacket::deserialize(&mut bytes).unwrap() {
+            assert_eq!(p.op(), OP_RRQ);
+            assert_eq!(p.filename(), "a.txt");
+            assert_eq!(p.mode(), "octet");
+        } else {
+            panic!("Wrong packet type")
+        }
+    }
+
+    #[test]
+    fn deserialize_bad_op() {
+        let mut bytes: Vec<u8> = vec![0x0, 0x61, 0x2E, 0x74, 0x78, 0x74, 0x0, 0x6F, 0x63, 0x74, 0x65, 0x74, 0x0];
+        let p = RequestPacket::deserialize(&mut bytes).err().unwrap();
+        assert_eq!(p, TFTPParseError::new("Bad OP code!"));
     }
 }

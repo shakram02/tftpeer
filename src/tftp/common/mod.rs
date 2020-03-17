@@ -1,27 +1,85 @@
+extern crate byteorder;
+
+use std::error::Error;
+use std::fmt;
+use std::fmt::{Debug, Formatter};
+
+use crate::tftp::common::ack_packet::AckPacket;
+use crate::tftp::common::data_packet::DataPacket;
+use crate::tftp::common::err_packet::ErrorPacket;
+use crate::tftp::common::request_packet::*;
+
+use self::byteorder::{ByteOrder, NetworkEndian};
+
 pub mod request_packet;
+pub mod data_packet;
+pub mod ack_packet;
+pub mod err_packet;
 
-/// Length of the OpCode field in bytes.
-pub(self) const OP_LEN: usize = 2;
+const OP_LEN: usize = 2;
 
-/// Total length of separators in bytes in a request packet.
-const REQUEST_SEP_LENGTH: usize = 2;
-
-/// Op code for Read Request
-pub const OP_RRQ: u16 = 0x001;
-/// Op code for Write Request
-pub const OP_WRQ: u16 = 0x002;
 /// Op code for Data packet
-pub const OP_DATA: u16 = 0x003;
-/// Op code for ACK packet
-pub const OP_ACK: u16 = 0x004;
+const OP_DATA: u16 = 0x003;
+/// Op code for Read Request
+const OP_RRQ: u16 = 0x001;
+/// Op code for Write Request
+const OP_WRQ: u16 = 0x002;
 /// Op code for Error packet
-pub const OP_ERR: u16 = 0x005;
+const OP_ERR: u16 = 0x005;
+/// Op code for ACK packet
+const OP_ACK: u16 = 0x004;
 
-pub trait Packet {
-    fn into_bytes(self) -> Vec<u8>;
+#[derive(Debug, Eq, PartialEq)]
+pub struct TFTPParseError {
+    details: String
 }
 
-pub trait TFTPPacket: Packet {
-    fn op(&self) -> u16;
-    fn serialize_op(&self, buf: &mut Vec<u8>);
+impl Error for TFTPParseError {
+    fn description(&self) -> &str {
+        &self.details
+    }
+}
+
+impl TFTPParseError {
+    fn new(msg: &str) -> TFTPParseError {
+        TFTPParseError {
+            details: msg.to_string()
+        }
+    }
+}
+
+impl fmt::Display for TFTPParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Failed to parse packet: {}", self.details)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum TFTPPacket {
+    RRQ(ReadRequestPacket),
+    WRQ(WriteRequestPacket),
+    ACK(AckPacket),
+    ERR(ErrorPacket),
+    DATA(DataPacket),
+}
+
+pub trait Serializable {
+    fn serialize(self) -> Vec<u8>;
+}
+
+pub trait Deserializable {
+    fn deserialize(buf: &Vec<u8>) -> Result<TFTPPacket, TFTPParseError>;
+}
+
+pub fn parse_udp_packet(buf: &Vec<u8>) -> TFTPPacket {
+    let p = match NetworkEndian::read_u16(buf) {
+        OP_RRQ => ReadRequestPacket::deserialize(buf),
+        OP_WRQ => WriteRequestPacket::deserialize(buf),
+        OP_ACK => AckPacket::deserialize(buf),
+        OP_ERR => ErrorPacket::deserialize(buf),
+        OP_DATA => DataPacket::deserialize(buf),
+        val => panic!(format!("Invalid opcode [{}]", val))
+    };
+
+    p.unwrap()
 }

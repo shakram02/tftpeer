@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/tftp-er.iml" filepath="$PROJECT_DIR$/tftp-er.iml" />
+      <module fileurl="file://$PROJECT_DIR$/tftpeer.iml" filepath="$PROJECT_DIR$/tftpeer.iml" />
     </modules>
   </component>
 </project>

@@ -1,13 +1,12 @@
-use std::net::UdpSocket;
-
-use crate::tftp::common::{OP_RRQ, Packet, request_packet::RequestPacket};
+use crate::tftp::common::{request_packet::ReadRequestPacket, Serializable};
+use crate::tftp::common::request_packet::Request;
 
 mod tftp;
 
 fn main() {
     tftp::hello();
-    let packet = RequestPacket::new(OP_RRQ, "a.txt", "octet");
-    println!("{:X?}", packet.into_bytes());
+    let packet = ReadRequestPacket::new("a.txt", "octet");
+    println!("{:X?}", packet.serialize());
     // let sock = UdpSocket::bind("127.0.0.1:0").expect("Couldn't bind to address");
     // println!("Listening on {0}...", sock.local_addr().unwrap());
 
