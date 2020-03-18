@@ -6,11 +6,9 @@
 ///
 /// A WRQ is acknowledged with an ACK packet having a
 /// block number of zero.
-
 use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_ACK};
 
 use super::byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
-
 
 const ACK_LEN: usize = 4;
 const BLK_NUM_OFFSET: usize = 2;
@@ -22,8 +20,12 @@ pub struct AckPacket {
 }
 
 impl AckPacket {
-    fn new(blk: u16) -> Self {
+    pub fn new(blk: u16) -> Self {
         AckPacket { op: OP_ACK, blk }
+    }
+
+    pub fn blk(&self) -> u16 {
+        self.blk
     }
 }
 
@@ -38,11 +40,13 @@ impl Serializable for AckPacket {
 }
 
 impl Deserializable for AckPacket {
-    fn deserialize(buf: &Vec<u8>) -> Result<TFTPPacket, TFTPParseError> {
+    fn deserialize(buf: &[u8]) -> Result<TFTPPacket, TFTPParseError> {
         let op = NetworkEndian::read_u16(buf);
 
         if op != OP_ACK {
-            return Err(TFTPParseError::new(format!("Bad OP code! [{}]", op).as_str()));
+            return Err(TFTPParseError::new(
+                format!("Bad OP code! [{}]", op).as_str(),
+            ));
         }
 
         let blk = NetworkEndian::read_u16(&buf[BLK_NUM_OFFSET..]);
@@ -52,8 +56,8 @@ impl Deserializable for AckPacket {
 
 #[cfg(test)]
 mod tests {
+    use crate::tftp::common::ack_packet::AckPacket;
     use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, OP_ACK};
-    use crate::tftp::common::ack_packet::{AckPacket};
 
     use super::super::byteorder::{NetworkEndian, WriteBytesExt};
 
@@ -94,4 +98,3 @@ mod tests {
         assert_eq!(p.details, format!("Bad OP code! [{}]", bad_op).as_str())
     }
 }
-

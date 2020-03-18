@@ -1,10 +1,10 @@
 use std::io::Write;
 
-use crate::tftp::common::{Deserializable, OP_LEN, Serializable, TFTPPacket, TFTPParseError, OP_DATA};
+use crate::tftp::common::{
+    Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_DATA, OP_LEN,
+};
 
 use super::byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
-
-
 
 const BLK_NUM_LEN: usize = 2;
 const DATA_MAX_LEN: usize = 512;
@@ -23,6 +23,13 @@ impl DataPacket {
             blk,
             data,
         }
+    }
+
+    pub fn blk(&self) -> u16 {
+        self.blk
+    }
+    pub fn data(self) -> Vec<u8> {
+        self.data
     }
 }
 
@@ -46,7 +53,7 @@ impl Serializable for DataPacket {
 }
 
 impl Deserializable for DataPacket {
-    fn deserialize(buf: &Vec<u8>) -> Result<TFTPPacket, TFTPParseError> {
+    fn deserialize(buf: &[u8]) -> Result<TFTPPacket, TFTPParseError> {
         let op: u16 = NetworkEndian::read_u16(&buf[0..2]);
 
         if OP_DATA != op {
@@ -76,4 +83,3 @@ mod tests {
     #[test]
     fn deserialize_error() {}
 }
-

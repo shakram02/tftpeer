@@ -5,7 +5,6 @@
 /// document.) The error message is intended for human consumption, and
 /// should be in netascii.  Like all other strings, it is terminated with
 /// a zero byte.
-
 use std::io::Write;
 
 use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_ERR};
@@ -23,8 +22,19 @@ pub struct ErrorPacket {
 }
 
 impl ErrorPacket {
-    fn new(code: u16, msg: &str) -> Self {
-        ErrorPacket { op: OP_ERR, code, err: msg.to_string() }
+    pub fn new(code: u16, msg: &str) -> Self {
+        ErrorPacket {
+            op: OP_ERR,
+            code,
+            err: msg.to_string(),
+        }
+    }
+
+    pub fn code(&self) -> u16 {
+        self.code
+    }
+    pub fn err(&self) -> &str {
+        &self.err
     }
 }
 
@@ -47,11 +57,13 @@ impl Serializable for ErrorPacket {
 }
 
 impl Deserializable for ErrorPacket {
-    fn deserialize(buf: &Vec<u8>) -> Result<TFTPPacket, TFTPParseError> {
+    fn deserialize(buf: &[u8]) -> Result<TFTPPacket, TFTPParseError> {
         let op = NetworkEndian::read_u16(buf);
 
         if op != OP_ERR {
-            return Err(TFTPParseError::new(format!("Bad OP code! [{}]", op).as_str()));
+            return Err(TFTPParseError::new(
+                format!("Bad OP code! [{}]", op).as_str(),
+            ));
         }
 
         let code = NetworkEndian::read_u16(buf);
@@ -66,8 +78,8 @@ impl Deserializable for ErrorPacket {
 mod tests {
     use std::io::Write;
 
-    use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, OP_ERR};
     use crate::tftp::common::err_packet::ErrorPacket;
+    use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, OP_ERR};
 
     use super::super::byteorder::{NetworkEndian, WriteBytesExt};
 
@@ -96,7 +108,9 @@ mod tests {
             assert_eq!(p.op, OP_ERR);
             assert_eq!(p.code, err_code);
             assert_eq!(p.err, err_msg);
-        } else { panic!("Invalid type") }
+        } else {
+            panic!("Invalid type")
+        }
     }
 
     #[test]
