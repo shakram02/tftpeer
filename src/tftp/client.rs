@@ -7,11 +7,11 @@ use std::path::Path;
 
 use pretty_bytes::converter::convert;
 
-use crate::tftp::common::{Serializable, STRIDE_SIZE, TFTPPacket};
-use crate::tftp::common::ack_packet::AckPacket;
-use crate::tftp::common::data_packet::DataPacket;
-use crate::tftp::common::err_packet::{ErrorPacket, TFTPError};
-use crate::tftp::common::request_packet::{ReadRequestPacket, WriteRequestPacket};
+use crate::tftp::shared::{Serializable, STRIDE_SIZE, TFTPPacket};
+use crate::tftp::shared::ack_packet::AckPacket;
+use crate::tftp::shared::data_packet::DataPacket;
+use crate::tftp::shared::err_packet::{ErrorPacket, TFTPError};
+use crate::tftp::shared::request_packet::{ReadRequestPacket, WriteRequestPacket};
 
 struct TFTPClient {
     packet_buffer: Vec<Vec<u8>>,
@@ -59,7 +59,7 @@ impl TFTPClient {
     }
 
     pub fn process_packet(&mut self, buf: &[u8]) {
-        let packet = crate::tftp::common::parse_udp_packet(&buf);
+        let packet = crate::tftp::shared::parse_udp_packet(&buf);
         match packet {
             TFTPPacket::DATA(data) => self.on_data(data),
             TFTPPacket::ACK(ack) => self.on_ack(ack),

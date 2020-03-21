@@ -4,10 +4,10 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 
-use crate::tftp::common::ack_packet::AckPacket;
-use crate::tftp::common::data_packet::DataPacket;
-use crate::tftp::common::err_packet::ErrorPacket;
-use crate::tftp::common::request_packet::*;
+use crate::tftp::shared::ack_packet::AckPacket;
+use crate::tftp::shared::data_packet::DataPacket;
+use crate::tftp::shared::err_packet::ErrorPacket;
+use crate::tftp::shared::request_packet::*;
 
 use self::byteorder::{ByteOrder, NetworkEndian};
 

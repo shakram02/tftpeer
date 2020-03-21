@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use crate::tftp::common::{
+use crate::tftp::shared::{
     Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_DATA, OP_LEN,
 };
 

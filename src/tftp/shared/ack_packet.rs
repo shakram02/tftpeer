@@ -6,7 +6,7 @@
 ///
 /// A WRQ is acknowledged with an ACK packet having a
 /// block number of zero.
-use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_ACK};
+use crate::tftp::shared::{Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_ACK};
 
 use super::byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 
@@ -56,8 +56,8 @@ impl Deserializable for AckPacket {
 
 #[cfg(test)]
 mod tests {
-    use crate::tftp::common::ack_packet::AckPacket;
-    use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, OP_ACK};
+    use crate::tftp::shared::ack_packet::AckPacket;
+    use crate::tftp::shared::{Deserializable, Serializable, TFTPPacket, OP_ACK};
 
     use super::super::byteorder::{NetworkEndian, WriteBytesExt};
 

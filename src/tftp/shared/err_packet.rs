@@ -7,7 +7,7 @@
 /// a zero byte.
 use std::io::Write;
 
-use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_ERR};
+use crate::tftp::shared::{Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_ERR};
 
 use super::byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 
@@ -137,9 +137,9 @@ impl Deserializable for ErrorPacket {
 mod tests {
     use std::io::Write;
 
-    use crate::tftp::common::err_packet::TFTPError::IllegalOperation;
-    use crate::tftp::common::err_packet::{get_err_details, ErrorPacket};
-    use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, OP_ERR};
+    use crate::tftp::shared::err_packet::TFTPError::IllegalOperation;
+    use crate::tftp::shared::err_packet::{get_err_details, ErrorPacket};
+    use crate::tftp::shared::{Deserializable, Serializable, TFTPPacket, OP_ERR};
 
     use super::super::byteorder::{NetworkEndian, WriteBytesExt};
 

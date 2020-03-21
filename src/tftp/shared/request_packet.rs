@@ -3,7 +3,7 @@ use std::str;
 
 use byteorder::NetworkEndian;
 
-use crate::tftp::common::{
+use crate::tftp::shared::{
     Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_LEN, OP_RRQ, OP_WRQ,
 };
 
@@ -156,8 +156,8 @@ impl Deserializable for RequestPacket {
 
 #[cfg(test)]
 mod tests {
-    use crate::tftp::common::request_packet::{Request, RequestPacket};
-    use crate::tftp::common::{
+    use crate::tftp::shared::request_packet::{Request, RequestPacket};
+    use crate::tftp::shared::{
         Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_RRQ, OP_WRQ,
     };
 
