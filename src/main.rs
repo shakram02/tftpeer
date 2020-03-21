@@ -1,4 +1,3 @@
-use std::env;
 use std::path::Path;
 
 use clap::Clap;
@@ -58,12 +57,18 @@ fn main() -> std::io::Result<()> {
         SubCommand::Client(client_args) => {
             let addr = format!("{}:{}", client_args.address, client_args.port);
             if client_args.upload {
-                println!("[UPLOAD] FILE: ({}) TO SERVER: {}", client_args.filename, addr);
+                println!(
+                    "[UPLOAD] FILE: ({}) TO SERVER: {}",
+                    client_args.filename, addr
+                );
             } else {
-                println!("[DOWNLOAD] FILE: ({}) SERVER: {}", client_args.filename, addr);
+                println!(
+                    "[DOWNLOAD] FILE: ({}) SERVER: {}",
+                    client_args.filename, addr
+                );
             }
 
-            client_main(&addr, &client_args.filename, client_args.upload);
+            client_main(&addr, &client_args.filename, client_args.upload).unwrap();
         }
         SubCommand::Server => println!("Server"),
     };

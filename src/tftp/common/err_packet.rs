@@ -12,7 +12,6 @@ use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, TFTPParseErr
 use super::byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 
 const ERR_LEN: usize = 4;
-const ERR_OFFSET: usize = 4;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ErrorPacket {
@@ -21,12 +20,72 @@ pub struct ErrorPacket {
     err: String,
 }
 
+pub enum TFTPError {
+    UndefinedError,
+    FileNotFound,
+    AccessViolation,
+    DiskFull,
+    IllegalOperation,
+    UnknownTID,
+    FileExists,
+    NoSuchUser,
+}
+
+fn get_err_by_code(code: u16) -> (TFTPError, String) {
+    match code {
+        0 => (
+            TFTPError::UndefinedError,
+            String::from("Not defined, see error message (if any).\0"),
+        ),
+        1 => (TFTPError::FileNotFound, String::from("File not found.\0")),
+        2 => (
+            TFTPError::AccessViolation,
+            String::from("Access violation.\0"),
+        ),
+        3 => (
+            TFTPError::DiskFull,
+            String::from("Disk full or allocation exceeded.\0"),
+        ),
+        4 => (
+            TFTPError::IllegalOperation,
+            String::from("Illegal TFTP operation.\0"),
+        ),
+        5 => (
+            TFTPError::UnknownTID,
+            String::from("Unknown transfer ID.\0"),
+        ),
+        6 => (
+            TFTPError::FileExists,
+            String::from("File already exists.\0"),
+        ),
+        7 => (TFTPError::NoSuchUser, String::from("No such user.\0")),
+        _ => panic!(format!("Invalid error code [{}]", code)),
+    }
+}
+
+fn get_err_details(err: TFTPError) -> (u16, String) {
+    match err {
+        TFTPError::UndefinedError => (
+            0,
+            String::from("Not defined, see error message (if any).\0"),
+        ),
+        TFTPError::FileNotFound => (1, String::from("File not found.\0")),
+        TFTPError::AccessViolation => (2, String::from("Access violation.\0")),
+        TFTPError::DiskFull => (3, String::from("Disk full or allocation exceeded.\0")),
+        TFTPError::IllegalOperation => (4, String::from("Illegal TFTP operation.\0")),
+        TFTPError::UnknownTID => (5, String::from("Unknown transfer ID.\0")),
+        TFTPError::FileExists => (6, String::from("File already exists.\0")),
+        TFTPError::NoSuchUser => (7, String::from("No such user.\0")),
+    }
+}
+
 impl ErrorPacket {
-    pub fn new(code: u16, msg: &str) -> Self {
+    pub fn new(err: TFTPError) -> Self {
+        let (code, msg) = get_err_details(err);
         ErrorPacket {
             op: OP_ERR,
             code,
-            err: msg.to_string(),
+            err: msg,
         }
     }
 
@@ -67,9 +126,9 @@ impl Deserializable for ErrorPacket {
         }
 
         let code = NetworkEndian::read_u16(buf);
-        let msg = std::str::from_utf8(&buf[ERR_OFFSET..]).unwrap();
+        let (err_type, _) = get_err_by_code(code);
 
-        let p = ErrorPacket::new(code, msg);
+        let p = ErrorPacket::new(err_type);
         Ok(TFTPPacket::ERR(p))
     }
 }
@@ -78,17 +137,18 @@ impl Deserializable for ErrorPacket {
 mod tests {
     use std::io::Write;
 
-    use crate::tftp::common::err_packet::ErrorPacket;
+    use crate::tftp::common::err_packet::TFTPError::IllegalOperation;
+    use crate::tftp::common::err_packet::{get_err_details, ErrorPacket};
     use crate::tftp::common::{Deserializable, Serializable, TFTPPacket, OP_ERR};
 
     use super::super::byteorder::{NetworkEndian, WriteBytesExt};
 
     #[test]
     fn serialize_ack_packet() {
-        let err_msg = "error message\0";
-        let p = ErrorPacket::new(0, err_msg);
-        let msg_bytes = &mut Vec::from(err_msg.as_bytes());
-        let mut serialized = vec![0, 5, 0, 0];
+        let p = ErrorPacket::new(IllegalOperation);
+        let (code, err) = get_err_details(IllegalOperation);
+        let msg_bytes = &mut Vec::from(err.as_bytes());
+        let mut serialized = vec![0, 5, 0, code as u8];
         serialized.append(msg_bytes);
 
         assert_eq!(p.serialize(), serialized);
@@ -96,8 +156,7 @@ mod tests {
 
     #[test]
     fn deserialize_ack_packet() {
-        let err_msg = "error message\0";
-        let err_code: u16 = 5;
+        let (err_code, err_msg) = get_err_details(IllegalOperation);
         let mut buf = Vec::new();
         let msg_bytes = &mut Vec::from(err_msg.as_bytes());
         buf.write_u16::<NetworkEndian>(OP_ERR).unwrap();

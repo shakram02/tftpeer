@@ -17,7 +17,8 @@ pub mod err_packet;
 pub mod request_packet;
 
 const OP_LEN: usize = 2;
-
+/// Stride size for reading / writing files.
+pub const STRIDE_SIZE: usize = 512;
 /// Op code for Data packet
 const OP_DATA: u16 = 0x003;
 /// Op code for Read Request
