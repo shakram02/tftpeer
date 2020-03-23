@@ -7,7 +7,7 @@
 /// a zero byte.
 use std::io::Write;
 
-use crate::tftp::shared::{Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_ERR};
+use crate::tftp::shared::{Deserializable, OP_ERR, Serializable, TFTPPacket, TFTPParseError};
 
 use super::byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 
@@ -28,7 +28,6 @@ pub enum TFTPError {
     IllegalOperation,
     UnknownTID,
     FileExists,
-    NoSuchUser,
 }
 
 fn get_err_by_code(code: u16) -> (TFTPError, String) {
@@ -58,7 +57,6 @@ fn get_err_by_code(code: u16) -> (TFTPError, String) {
             TFTPError::FileExists,
             String::from("File already exists.\0"),
         ),
-        7 => (TFTPError::NoSuchUser, String::from("No such user.\0")),
         _ => panic!(format!("Invalid error code [{}]", code)),
     }
 }
@@ -137,9 +135,9 @@ impl Deserializable for ErrorPacket {
 mod tests {
     use std::io::Write;
 
+    use crate::tftp::shared::{Deserializable, OP_ERR, Serializable, TFTPPacket};
+    use crate::tftp::shared::err_packet::{ErrorPacket, get_err_details};
     use crate::tftp::shared::err_packet::TFTPError::IllegalOperation;
-    use crate::tftp::shared::err_packet::{get_err_details, ErrorPacket};
-    use crate::tftp::shared::{Deserializable, Serializable, TFTPPacket, OP_ERR};
 
     use super::super::byteorder::{NetworkEndian, WriteBytesExt};
 

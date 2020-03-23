@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use clap::Clap;
 
 use crate::tftp::client::client_main;
