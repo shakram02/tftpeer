@@ -73,7 +73,6 @@ fn get_err_details(err: TFTPError) -> (u16, String) {
         TFTPError::IllegalOperation => (4, String::from("Illegal TFTP operation.\0")),
         TFTPError::UnknownTID => (5, String::from("Unknown transfer ID.\0")),
         TFTPError::FileExists => (6, String::from("File already exists.\0")),
-        TFTPError::NoSuchUser => (7, String::from("No such user.\0")),
     }
 }
 
@@ -123,7 +122,7 @@ impl Deserializable for ErrorPacket {
             ));
         }
 
-        let code = NetworkEndian::read_u16(buf);
+        let code = NetworkEndian::read_u16(&buf[2..]);
         let (err_type, _) = get_err_by_code(code);
 
         let p = ErrorPacket::new(err_type);
