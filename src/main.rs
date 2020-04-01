@@ -1,6 +1,7 @@
 use clap::Clap;
 
 use crate::tftp::client::client_main;
+use crate::tftp::server::server_main;
 
 mod tftp;
 
@@ -20,11 +21,11 @@ enum SubCommand {
     Client(ClientOperations),
     /// act as a TFTP server.
     #[clap(name = "server")]
-    Server,
+    Server(ServerArgs),
 }
 
 #[derive(Clap, Debug)]
-struct Server {
+struct ServerArgs {
     /// IP for the server to use.
     #[clap(short = "a", long = "address", default_value = "127.0.0.1")]
     address: String,
@@ -49,7 +50,7 @@ struct ClientOperations {
     port: u16,
 }
 
-fn main() -> std::io::Result<()> {
+fn main() {
     let opts: Opts = Opts::parse();
     match opts.subcmd {
         SubCommand::Client(client_args) => {
@@ -68,8 +69,8 @@ fn main() -> std::io::Result<()> {
 
             client_main(&addr, &client_args.filename, client_args.upload).unwrap();
         }
-        SubCommand::Server => println!("Server"),
+        SubCommand::Server(server_args) => {
+            server_main(&server_args.address, server_args.port);
+        }
     };
-
-    Ok(())
 }
