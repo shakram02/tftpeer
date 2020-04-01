@@ -40,6 +40,10 @@ impl DataPacket {
 }
 
 impl Serializable for DataPacket {
+    fn box_serialize(self: Box<Self>) -> Vec<u8> {
+        self.serialize()
+    }
+
     fn serialize(self) -> Vec<u8> {
         let buf_len = OP_LEN + BLK_NUM_LEN + self.data_length();
         let mut buf: Vec<u8> = Vec::with_capacity(buf_len);

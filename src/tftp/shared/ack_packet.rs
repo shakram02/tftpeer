@@ -30,6 +30,9 @@ impl AckPacket {
 }
 
 impl Serializable for AckPacket {
+    fn box_serialize(self: Box<Self>) -> Vec<u8> {
+        self.serialize()
+    }
     fn serialize(self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(ACK_LEN);
         buf.write_u16::<NetworkEndian>(self.op).unwrap();
@@ -70,7 +73,7 @@ mod tests {
         buf.write_u16::<NetworkEndian>(OP_ACK).unwrap();
         buf.write_u16::<NetworkEndian>(blk).unwrap();
 
-        assert_eq!(p.serialize(), buf);
+        assert_eq!(Box::new(p).serialize(), buf);
     }
 
     #[test]

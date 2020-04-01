@@ -7,7 +7,7 @@
 /// a zero byte.
 use std::io::Write;
 
-use crate::tftp::shared::{Deserializable, OP_ERR, Serializable, TFTPPacket, TFTPParseError};
+use crate::tftp::shared::{Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_ERR};
 
 use super::byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 
@@ -95,6 +95,10 @@ impl ErrorPacket {
 }
 
 impl Serializable for ErrorPacket {
+    fn box_serialize(self: Box<Self>) -> Vec<u8> {
+        self.serialize()
+    }
+
     fn serialize(self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(ERR_LEN);
         buf.write_u16::<NetworkEndian>(self.op).unwrap();
@@ -134,9 +138,9 @@ impl Deserializable for ErrorPacket {
 mod tests {
     use std::io::Write;
 
-    use crate::tftp::shared::{Deserializable, OP_ERR, Serializable, TFTPPacket};
-    use crate::tftp::shared::err_packet::{ErrorPacket, get_err_details};
     use crate::tftp::shared::err_packet::TFTPError::IllegalOperation;
+    use crate::tftp::shared::err_packet::{get_err_details, ErrorPacket};
+    use crate::tftp::shared::{Deserializable, Serializable, TFTPPacket, OP_ERR};
 
     use super::super::byteorder::{NetworkEndian, WriteBytesExt};
 
@@ -148,7 +152,7 @@ mod tests {
         let mut serialized = vec![0, 5, 0, code as u8];
         serialized.append(msg_bytes);
 
-        assert_eq!(p.serialize(), serialized);
+        assert_eq!(Box::new(p).serialize(), serialized);
     }
 
     #[test]

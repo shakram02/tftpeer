@@ -43,8 +43,12 @@ impl Request for ReadRequestPacket {
 }
 
 impl Serializable for ReadRequestPacket {
+    fn box_serialize(self: Box<Self>) -> Vec<u8> {
+        self.serialize()
+    }
+
     fn serialize(self) -> Vec<u8> {
-        self.req.serialize()
+        Box::new(self.req).serialize()
     }
 }
 
@@ -82,6 +86,10 @@ impl Request for WriteRequestPacket {
 }
 
 impl Serializable for WriteRequestPacket {
+    fn box_serialize(self: Box<Self>) -> Vec<u8> {
+        self.serialize()
+    }
+
     fn serialize(self) -> Vec<u8> {
         self.req.serialize()
     }
@@ -111,6 +119,10 @@ impl RequestPacket {
 }
 
 impl Serializable for RequestPacket {
+    fn box_serialize(self: Box<Self>) -> Vec<u8> {
+        self.serialize()
+    }
+
     fn serialize(self) -> Vec<u8> {
         let length = OP_LEN + self.filename.len() + self.mode.len();
         let mut buf = Vec::with_capacity(length);

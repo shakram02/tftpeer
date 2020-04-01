@@ -12,10 +12,10 @@ use crate::tftp::shared::request_packet::*;
 use self::byteorder::{ByteOrder, NetworkEndian};
 
 pub mod ack_packet;
+pub mod data_channel;
 pub mod data_packet;
 pub mod err_packet;
 pub mod request_packet;
-pub mod tftp_data_channel;
 
 const OP_LEN: usize = 2;
 /// Stride size for reading / writing files.
@@ -55,6 +55,7 @@ impl Display for TFTPPacket {
 }
 
 pub trait Serializable {
+    fn box_serialize(self: Box<Self>) -> Vec<u8>;
     fn serialize(self) -> Vec<u8>;
 }
 
