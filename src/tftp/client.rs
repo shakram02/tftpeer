@@ -54,7 +54,7 @@ impl TFTPClient {
     /// Returns the first packet in the packet
     /// buffer to be sent to the server.
     pub fn get_next_packet(&mut self) -> Vec<u8> {
-        let next_packet = self.data_channel.packet_at_hand().unwrap().box_serialize();
+        let next_packet = self.data_channel.packet_at_hand().unwrap();
         mem::replace(&mut self.packet_buffer, Some(next_packet)).unwrap()
     }
 

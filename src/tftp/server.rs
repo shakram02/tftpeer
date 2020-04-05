@@ -1,22 +1,18 @@
 extern crate pretty_bytes;
 
-use std::mem;
 use std::net::{SocketAddr, UdpSocket};
 
 use async_std::task as asyncstd_task;
 use pretty_bytes::converter::convert;
 
-use crate::main;
 use crate::tftp::shared::{parse_udp_packet, Serializable, TFTPPacket};
-use crate::tftp::shared::ack_packet::AckPacket;
 use crate::tftp::shared::data_channel::{DataChannel, DataChannelMode};
 use crate::tftp::shared::err_packet::{ErrorPacket, TFTPError};
 use crate::tftp::shared::request_packet::{ReadRequestPacket, Request, WriteRequestPacket};
 
 /// A TFTP server that supports a single client.
 struct TFTPServer {
-    data_channel: DataChannel,
-    next_packet: Option<Vec<u8>>,
+    data_channel: DataChannel
 }
 
 impl TFTPServer {
@@ -41,7 +37,6 @@ impl TFTPServer {
 
     pub fn run(&mut self, raw_packet: &[u8]) {
         let p = parse_udp_packet(raw_packet);
-        println!("RECV: {:?}", p);
         match p {
             TFTPPacket::ERR(ep) => panic!("Terminating client: {}", ep.err()),
             TFTPPacket::ACK(ack) => self.data_channel.on_ack(ack),
@@ -51,36 +46,21 @@ impl TFTPServer {
     }
 
     fn init_rrq_response(rrq: ReadRequestPacket) -> Result<TFTPServer, ErrorPacket> {
-        DataChannel::new(rrq.filename(), DataChannelMode::Tx).and_then(|mut data_channel| {
-            let packet = data_channel.packet_at_hand().unwrap();
-            let server = TFTPServer {
-                data_channel,
-                next_packet: Some(packet.box_serialize()),
-            };
+        DataChannel::new(rrq.filename(), DataChannelMode::Tx).and_then(|data_channel| {
+            let server = TFTPServer { data_channel };
             Ok(server)
         })
     }
 
     fn init_wrq_response(wrq: WriteRequestPacket) -> Result<TFTPServer, ErrorPacket> {
         DataChannel::new(wrq.filename(), DataChannelMode::Rx).and_then(|data_channel| {
-            let ack = AckPacket::new(0).serialize();
-            let server = TFTPServer {
-                data_channel,
-                next_packet: Some(ack),
-            };
+            let server = TFTPServer { data_channel };
             Ok(server)
         })
     }
 
     fn get_next_packet(&mut self) -> Vec<u8> {
-        let packet = self.data_channel.packet_at_hand();
-        match packet {
-            // TODO: this should be none and not crash.
-            None => { mem::replace(&mut self.next_packet, Some(Vec::new())) }
-            Some(p) => {
-                mem::replace(&mut self.next_packet, Some(p.box_serialize()))
-            }
-        }.unwrap()
+        self.data_channel.packet_at_hand().unwrap()
     }
 
     fn done(&self) -> bool {
@@ -91,18 +71,22 @@ impl TFTPServer {
 fn handle_client(socket: UdpSocket, mut server: TFTPServer, client_addr: SocketAddr) {
     // asyncstd_task::spawn(async move {
     loop {
-        println!("Handle clientaaaa");
         if server.is_err() {
             eprintln!("Fatal error: {}", server.err());
             panic!();
         }
 
         if server.done() {
-            break;
+            break;  // If we sent the last data packet in the previous loop
         }
+
         let p = server.get_next_packet();
         println!("Sending #{} [{}]", server.blk(), convert(p.len() as f64));
         socket.send_to(&p, client_addr).unwrap();
+
+        if server.done() {
+            break;  // If we've just sent the last ack
+        }
 
         let mut buf = [0 as u8; 1024];
         let (count, addr) = socket

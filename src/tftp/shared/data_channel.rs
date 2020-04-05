@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::{Read, Write};
-use std::mem;
 use std::path::Path;
 
 use crate::tftp::shared::{Serializable, STRIDE_SIZE};
@@ -32,7 +31,7 @@ pub struct DataChannel {
     blk: isize,
     error: Option<String>,
     state: DataChannelState,
-    packet_at_hand: Option<Box<dyn Serializable>>,
+    packet_at_hand: Option<Vec<u8>>,
 }
 
 impl DataChannel {
@@ -44,14 +43,18 @@ impl DataChannel {
     /// * `channel_mode` - Tells whether this channel will be receiving or sending data.
     pub fn new(file_name: &str, channel_mode: DataChannelMode) -> Result<Self, ErrorPacket> {
         let (initial_blk, initial_state, fd) = match channel_mode {
+            // We an RRQ is received, we go to SEND_DATA
+            // state to send the DATA #1.
             DataChannelMode::Tx => (
-                -1,
+                1,
                 DataChannelState::SendData,
                 File::open(Path::new(file_name)),
             ),
+            // We an WRQ is received, we go to SEND_ACK
+            // state to send the ACK #0.
             DataChannelMode::Rx => (
                 0,
-                DataChannelState::WaitData,
+                DataChannelState::SendAck,
                 File::create(Path::new(file_name)),
             ),
         };
@@ -71,6 +74,9 @@ impl DataChannel {
 
         if channel.state == DataChannelState::SendData {
             channel.send_data();
+        } else {
+            // ACK for RRQ.
+            channel.send_ack();
         }
 
         Ok(channel)
@@ -138,9 +144,7 @@ impl DataChannel {
 
         self.set_next_ack(AckPacket::new(self.blk as u16));
 
-        if self.state == DataChannelState::SendLastAck {
-            self.set_state(DataChannelState::Done);
-        } else {
+        if self.state == DataChannelState::SendAck {
             self.set_state(DataChannelState::WaitData);
         }
     }
@@ -185,17 +189,18 @@ impl DataChannel {
     }
 
     fn set_next_data(&mut self, packet: DataPacket) {
-        self.set_packet(Box::new(packet))
+        self.set_packet(packet.serialize());
     }
 
     fn set_next_err(&mut self, packet: ErrorPacket) {
-        self.set_packet(Box::new(packet))
+        self.set_packet(packet.serialize());
     }
 
     fn set_next_ack(&mut self, packet: AckPacket) {
-        self.set_packet(Box::new(packet))
+        self.set_packet(packet.serialize());
     }
-    fn set_packet(&mut self, packet: Box<dyn Serializable>) {
+
+    fn set_packet(&mut self, packet: Vec<u8>) {
         self.packet_at_hand = Some(packet)
     }
 
@@ -219,7 +224,18 @@ impl DataChannel {
         self.error.unwrap()
     }
 
-    pub fn packet_at_hand(&mut self) -> Option<Box<dyn Serializable>> {
-        mem::replace(&mut self.packet_at_hand, None)
+    pub fn packet_at_hand(&mut self) -> Option<Vec<u8>> {
+        // If the previous state was SendLastAck,
+        // now we're done.
+        if self.state == DataChannelState::SendLastAck {
+            self.set_state(DataChannelState::Done);
+        }
+
+        match &self.packet_at_hand {
+            None => None,
+            Some(p) => {
+                Some(p.clone())
+            }
+        }
     }
 }
