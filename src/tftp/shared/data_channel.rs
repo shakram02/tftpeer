@@ -56,7 +56,6 @@ impl DataChannel {
             ),
         };
 
-        println!("STATE: {:?} FD: {:?}", initial_state, fd);
         if fd.is_err() {
             return Err(ErrorPacket::new(TFTPError::FileNotFound));
         }
@@ -112,10 +111,13 @@ impl DataChannel {
             self.state == DataChannelState::WaitAck || self.state == DataChannelState::WaitLastAck
         );
 
-        if !self.is_valid_blk(ap.blk()) {
+        if self.blk as u16 != ap.blk() {
             self.set_blk_error(ap.blk());
             return;
         }
+
+        // TODO: fix upload
+        self.blk += 1;
 
         match self.state {
             DataChannelState::WaitAck => {
@@ -167,7 +169,6 @@ impl DataChannel {
     }
 
     fn set_state(&mut self, state: DataChannelState) {
-        println!("Moving to {:?}", state);
         self.state = state;
     }
 
@@ -196,10 +197,6 @@ impl DataChannel {
     }
     fn set_packet(&mut self, packet: Box<dyn Serializable>) {
         self.packet_at_hand = Some(packet)
-    }
-
-    fn is_valid_blk(&self, blk: u16) -> bool {
-        (self.blk + 1) as u16 != blk
     }
 
     pub fn transfer_size(&self) -> usize {

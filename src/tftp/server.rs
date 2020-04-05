@@ -8,6 +8,7 @@ use pretty_bytes::converter::convert;
 
 use crate::main;
 use crate::tftp::shared::{parse_udp_packet, Serializable, TFTPPacket};
+use crate::tftp::shared::ack_packet::AckPacket;
 use crate::tftp::shared::data_channel::{DataChannel, DataChannelMode};
 use crate::tftp::shared::err_packet::{ErrorPacket, TFTPError};
 use crate::tftp::shared::request_packet::{ReadRequestPacket, Request, WriteRequestPacket};
@@ -61,15 +62,13 @@ impl TFTPServer {
     }
 
     fn init_wrq_response(wrq: WriteRequestPacket) -> Result<TFTPServer, ErrorPacket> {
-        DataChannel::new(wrq.filename(), DataChannelMode::Rx).and_then(|_data_channel| {
-            // let ack = AckPacket::new(0).box_serialize();
-            // let server = TFTPServer {
-            //     data_channel,
-            //     next_packet: Some(ack),
-            //     done: false,
-            // };
-            // Ok(server)
-            todo!()
+        DataChannel::new(wrq.filename(), DataChannelMode::Rx).and_then(|data_channel| {
+            let ack = AckPacket::new(0).serialize();
+            let server = TFTPServer {
+                data_channel,
+                next_packet: Some(ack),
+            };
+            Ok(server)
         })
     }
 
