@@ -6,7 +6,7 @@ use async_std::task as asyncstd_task;
 use pretty_bytes::converter::convert;
 
 use crate::tftp::shared::{parse_udp_packet, Serializable, TFTPPacket};
-use crate::tftp::shared::data_channel::{DataChannel, DataChannelMode};
+use crate::tftp::shared::data_channel::{DataChannel, DataChannelMode, DataChannelOwner};
 use crate::tftp::shared::err_packet::{ErrorPacket, TFTPError};
 use crate::tftp::shared::request_packet::{ReadRequestPacket, Request, WriteRequestPacket};
 
@@ -46,17 +46,19 @@ impl TFTPServer {
     }
 
     fn init_rrq_response(rrq: ReadRequestPacket) -> Result<TFTPServer, ErrorPacket> {
-        DataChannel::new(rrq.filename(), DataChannelMode::Tx).and_then(|data_channel| {
-            let server = TFTPServer { data_channel };
-            Ok(server)
-        })
+        DataChannel::new(rrq.filename(), DataChannelMode::Tx, DataChannelOwner::Server)
+            .and_then(|data_channel| {
+                let server = TFTPServer { data_channel };
+                Ok(server)
+            })
     }
 
     fn init_wrq_response(wrq: WriteRequestPacket) -> Result<TFTPServer, ErrorPacket> {
-        DataChannel::new(wrq.filename(), DataChannelMode::Rx).and_then(|data_channel| {
-            let server = TFTPServer { data_channel };
-            Ok(server)
-        })
+        DataChannel::new(wrq.filename(), DataChannelMode::Rx, DataChannelOwner::Server)
+            .and_then(|data_channel| {
+                let server = TFTPServer { data_channel };
+                Ok(server)
+            })
     }
 
     fn get_next_packet(&mut self) -> Vec<u8> {
@@ -81,7 +83,7 @@ fn handle_client(socket: UdpSocket, mut server: TFTPServer, client_addr: SocketA
         }
 
         let p = server.get_next_packet();
-        // println!("Sending #{} [{}]", server.blk(), convert(p.len() as f64));
+        println!("Sending #{} [{}]", server.blk(), convert(p.len() as f64));
         socket.send_to(&p, client_addr).unwrap();
 
         if server.done() {

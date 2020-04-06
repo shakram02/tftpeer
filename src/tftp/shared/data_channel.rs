@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read, Write};
-use std::io;
+
 use std::path::Path;
 
 use crate::tftp::shared::{Serializable, STRIDE_SIZE};
@@ -35,11 +35,11 @@ pub enum DataChannelOwner {
 pub struct DataChannel {
     fd: Option<File>,
     file_name: String,
-    bytes: usize,
+    file_size: u64,
+    transferred_bytes: usize,
     blk: u16,
     error: Option<String>,
     state: DataChannelState,
-    owner: DataChannelOwner,
     packet_at_hand: Option<Vec<u8>>,
 }
 
@@ -70,14 +70,21 @@ impl DataChannel {
             None
         };
 
+        let (maybe_fd, size) = if maybe_fd.is_some() {
+            let (fd, size) = maybe_fd.unwrap();
+            (Some(fd), size)
+        } else {
+            (None, 0)
+        };
+
         let mut channel = DataChannel {
             fd: maybe_fd,
             file_name: file_name.to_string(),
-            bytes: 0,
+            file_size: size,
+            transferred_bytes: 0,
             blk: initial_blk,
             error: None,
             state: initial_state,
-            owner,
             packet_at_hand: None,
         };
 
@@ -99,8 +106,7 @@ impl DataChannel {
                     (0, DataChannelState::WaitAck)
                 } else {
                     // A server sending data will start with DATA #1
-                    // do_data() increases the block number anyways.
-                    (0, DataChannelState::SendData)
+                    (1, DataChannelState::SendData)
                 }
             }
             DataChannelMode::Rx => {
@@ -115,7 +121,7 @@ impl DataChannel {
         }
     }
 
-    fn open_file_for_transmission(file_name: &str, owner: DataChannelOwner) -> Result<File, ErrorPacket> {
+    fn open_file_for_transmission(file_name: &str, owner: DataChannelOwner) -> Result<(File, u64), ErrorPacket> {
         use std::fs;
         let fp = Path::new(file_name);
         let fd = File::open(fp)
@@ -130,7 +136,9 @@ impl DataChannel {
                     let msg = format!("{} file is empty.", direction);
                     Err(Error::new(ErrorKind::InvalidData, msg))
                 } else {
-                    Ok(fd)
+                    let meta = fs::metadata(fp).unwrap();
+
+                    Ok((fd, meta.len()))
                 }
             });
 
@@ -194,7 +202,7 @@ impl DataChannel {
 
         // The received blk
         // is the awaited blk number.
-        if (self.blk + 1) as u16 != dp.blk() {
+        if self.blk as u16 != dp.blk() {
             self.set_blk_error(dp.blk());
             return;
         }
@@ -205,12 +213,8 @@ impl DataChannel {
             self.fd = Some(File::create(fp).unwrap());
         }
 
-        // The party the receives data, sets
-        // its block number to ACK it on the
-        // text transfer.
-        self.blk = dp.blk();
         let data = &dp.data();
-        self.bytes += data.len();
+        self.transferred_bytes += data.len();
         self.fd.as_ref().unwrap().write_all(data).unwrap();
 
         if data.len() == STRIDE_SIZE {
@@ -229,6 +233,7 @@ impl DataChannel {
         println!("DO_ACK #{:?}", self.blk);
 
         self.set_next_ack(AckPacket::new(self.blk as u16));
+        self.blk += 1;
 
         if self.state == DataChannelState::SendAck {
             self.set_state(DataChannelState::WaitData);
@@ -240,25 +245,34 @@ impl DataChannel {
     /// set to true.
     fn send_data(&mut self) {
         assert_eq!(self.state, DataChannelState::SendData);
-        println!("DO_DATA #{:?}", self.blk + 1);
-
-        self.blk += 1;
+        println!("DO_DATA #{:?}", self.blk);
 
         let mut buf = [0; STRIDE_SIZE];
         let bytes_read = self.fd.as_ref().unwrap().read(&mut buf).unwrap();
-        self.bytes += bytes_read;
 
         // When I read 0 bytes, this means that the client
         // just sent the ack for the last chunk in the file.
-        if bytes_read == 0 {
-            self.set_state(DataChannelState::Done);
-            return; // Don't prepare any data packets, we're done.
+        if self.transferred_bytes >= self.file_size as usize {
+            if self.file_size % STRIDE_SIZE as u64 == 0 {
+                // Send 0-length Data packet
+                self.set_state(DataChannelState::WaitAck);
+                println!("FINAL: {}", self.transferred_bytes);
+                // Flag completion. to avoid entering this same state.
+                self.file_size -= 1;
+            } else {
+                self.set_state(DataChannelState::Done);
+                return; // Don't prepare any data packets, we're done.
+            }
         } else if bytes_read < STRIDE_SIZE {
             self.set_state(DataChannelState::WaitLastAck);
         } else {
             self.set_state(DataChannelState::WaitAck);
         }
 
+        // Update transfer size when sending the
+        // packet to avoid having off by 1 error
+        // when checking termination conditions.
+        self.transferred_bytes += bytes_read;
         // Send the next data packet.
         let data = Vec::from(&buf[0..bytes_read]);
         self.set_next_data(DataPacket::new(self.blk as u16, data));
@@ -278,6 +292,8 @@ impl DataChannel {
             self.set_blk_error(ap.blk());
             return;
         }
+
+        self.blk += 1;
 
         match self.state {
             DataChannelState::WaitAck => {
@@ -331,7 +347,7 @@ impl DataChannel {
     }
 
     pub fn transfer_size(&self) -> usize {
-        self.bytes
+        self.transferred_bytes
     }
 
     pub fn is_done(&self) -> bool {
