@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read, Write};
-
 use std::path::Path;
 
 use crate::tftp::shared::{Serializable, STRIDE_SIZE};
@@ -338,7 +337,6 @@ impl DataChannel {
     }
 
     fn set_next_ack(&mut self, packet: AckPacket) {
-        println!("ACK_AT_HAND #{}", packet.blk());
         self.set_packet(packet.serialize());
     }
 
@@ -351,6 +349,7 @@ impl DataChannel {
     }
 
     pub fn is_done(&self) -> bool {
+        println!("STATE CHECK IN DONE: {:?}", self.state);
         self.state == DataChannelState::Done
     }
 
@@ -368,6 +367,7 @@ impl DataChannel {
 
     pub fn packet_at_hand(&mut self) -> Option<Vec<u8>> {
         assert_ne!(self.state, DataChannelState::Done);
+
         // If the previous state was SendLastAck,
         // now we're done.
         if self.state == DataChannelState::SendLastAck {
