@@ -81,7 +81,7 @@ fn handle_client(socket: UdpSocket, mut server: TFTPServer, client_addr: SocketA
         }
 
         let p = server.get_next_packet();
-        println!("Sending #{} [{}]", server.blk(), convert(p.len() as f64));
+        // println!("Sending #{} [{}]", server.blk(), convert(p.len() as f64));
         socket.send_to(&p, client_addr).unwrap();
 
         if server.done() {

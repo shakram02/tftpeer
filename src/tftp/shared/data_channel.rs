@@ -25,6 +25,11 @@ enum DataChannelState {
     Done,
 }
 
+pub enum DataChannelOwner {
+    Server,
+    Client,
+}
+
 pub struct DataChannel {
     fd: File,
     bytes: usize,
@@ -46,7 +51,7 @@ impl DataChannel {
             // We an RRQ is received, we go to SEND_DATA
             // state to send the DATA #1.
             DataChannelMode::Tx => (
-                1,
+                0,
                 DataChannelState::SendData,
                 File::open(Path::new(file_name)),
             ),
@@ -89,12 +94,16 @@ impl DataChannel {
     /// * `dp` - Data packet received from the other end.
     pub fn on_data(&mut self, dp: DataPacket) {
         assert_eq!(self.state, DataChannelState::WaitData);
+        println!("ON_DATA #{:?}", dp.blk());
 
         if (self.blk + 1) as u16 != dp.blk() {
             self.set_blk_error(dp.blk());
             return;
         }
 
+        // The party the receives data, sets
+        // its block number to ACK it on the
+        // text transfer.
         self.blk = dp.blk() as isize;
         let data = &dp.data();
         self.bytes += data.len();
@@ -109,38 +118,11 @@ impl DataChannel {
         self.send_ack();
     }
 
-    /// Receives an ACK packet from the server
-    /// validates the block number then sends
-    /// the next data block.
-    pub fn on_ack(&mut self, ap: AckPacket) {
-        assert!(
-            self.state == DataChannelState::WaitAck || self.state == DataChannelState::WaitLastAck
-        );
-
-        if self.blk as u16 != ap.blk() {
-            self.set_blk_error(ap.blk());
-            return;
-        }
-
-        // TODO: fix upload
-        self.blk += 1;
-
-        match self.state {
-            DataChannelState::WaitAck => {
-                self.set_state(DataChannelState::SendData);
-                self.send_data();
-            }
-            DataChannelState::WaitLastAck => {
-                self.set_state(DataChannelState::Done);
-            }
-            _ => panic!("Should be waiting for am ACK."),
-        }
-    }
-
     fn send_ack(&mut self) {
         assert!(
             self.state == DataChannelState::SendAck || self.state == DataChannelState::SendLastAck
         );
+        println!("DO_ACK #{:?}", self.blk);
 
         self.set_next_ack(AckPacket::new(self.blk as u16));
 
@@ -154,6 +136,7 @@ impl DataChannel {
     /// set to true.
     fn send_data(&mut self) {
         assert_eq!(self.state, DataChannelState::SendData);
+        println!("DO_DATA #{:?}", self.blk + 1);
 
         self.blk += 1;
 
@@ -164,15 +147,47 @@ impl DataChannel {
         // When I read 0 bytes, this means that the client
         // just sent the ack for the last chunk in the file.
         if bytes_read == 0 {
+            self.set_state(DataChannelState::Done);
+            return; // Don't prepare any data packets, we're done.
+        } else if bytes_read < STRIDE_SIZE {
             self.set_state(DataChannelState::WaitLastAck);
         } else {
-            let data = Vec::from(&buf[0..bytes_read]);
-            self.set_next_data(DataPacket::new(self.blk as u16, data));
             self.set_state(DataChannelState::WaitAck);
+        }
+
+        // Send the next data packet.
+        let data = Vec::from(&buf[0..bytes_read]);
+        self.set_next_data(DataPacket::new(self.blk as u16, data));
+    }
+
+    /// Receives an ACK packet from the server
+    /// validates the block number then sends
+    /// the next data block.
+    pub fn on_ack(&mut self, ap: AckPacket) {
+        assert!(
+            self.state == DataChannelState::WaitAck || self.state == DataChannelState::WaitLastAck
+        );
+        println!("ON_ACK #{:?}", ap.blk());
+
+        if self.blk as u16 != ap.blk() {
+            self.set_blk_error(ap.blk());
+            return;
+        }
+
+        match self.state {
+            DataChannelState::WaitAck => {
+                self.set_state(DataChannelState::SendData);
+                self.send_data();
+            }
+            DataChannelState::WaitLastAck => {
+                self.set_state(DataChannelState::Done);
+            }
+            _ => panic!("Should be waiting for am ACK."),
         }
     }
 
     fn set_state(&mut self, state: DataChannelState) {
+        println!("Moving to {:?}", state);
         self.state = state;
     }
 
@@ -189,6 +204,7 @@ impl DataChannel {
     }
 
     fn set_next_data(&mut self, packet: DataPacket) {
+        println!("DATA_AT_HAND #{}", packet.blk());
         self.set_packet(packet.serialize());
     }
 
@@ -197,6 +213,7 @@ impl DataChannel {
     }
 
     fn set_next_ack(&mut self, packet: AckPacket) {
+        println!("ACK_AT_HAND #{}", packet.blk());
         self.set_packet(packet.serialize());
     }
 
@@ -225,6 +242,7 @@ impl DataChannel {
     }
 
     pub fn packet_at_hand(&mut self) -> Option<Vec<u8>> {
+        assert_ne!(self.state, DataChannelState::Done);
         // If the previous state was SendLastAck,
         // now we're done.
         if self.state == DataChannelState::SendLastAck {
