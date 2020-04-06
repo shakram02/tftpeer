@@ -1,5 +1,6 @@
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{Error, ErrorKind, Read, Write};
+use std::io;
 use std::path::Path;
 
 use crate::tftp::shared::{Serializable, STRIDE_SIZE};
@@ -7,13 +8,13 @@ use crate::tftp::shared::ack_packet::AckPacket;
 use crate::tftp::shared::data_packet::DataPacket;
 use crate::tftp::shared::err_packet::{ErrorPacket, TFTPError};
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum DataChannelMode {
     Tx,
     Rx,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 enum DataChannelState {
     WaitData,
     SendAck,
@@ -25,17 +26,20 @@ enum DataChannelState {
     Done,
 }
 
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum DataChannelOwner {
     Server,
     Client,
 }
 
 pub struct DataChannel {
-    fd: File,
+    fd: Option<File>,
+    file_name: String,
     bytes: usize,
-    blk: isize,
+    blk: u16,
     error: Option<String>,
     state: DataChannelState,
+    owner: DataChannelOwner,
     packet_at_hand: Option<Vec<u8>>,
 }
 
@@ -46,45 +50,137 @@ impl DataChannel {
     ///
     /// * `file_name` - Specified file name to read data from / write data to.
     /// * `channel_mode` - Tells whether this channel will be receiving or sending data.
-    pub fn new(file_name: &str, channel_mode: DataChannelMode) -> Result<Self, ErrorPacket> {
-        let (initial_blk, initial_state, fd) = match channel_mode {
-            // We an RRQ is received, we go to SEND_DATA
-            // state to send the DATA #1.
-            DataChannelMode::Tx => (
-                0,
-                DataChannelState::SendData,
-                File::open(Path::new(file_name)),
-            ),
-            // We an WRQ is received, we go to SEND_ACK
-            // state to send the ACK #0.
-            DataChannelMode::Rx => (
-                0,
-                DataChannelState::SendAck,
-                File::create(Path::new(file_name)),
-            ),
+    pub fn new(file_name: &str, mode: DataChannelMode, owner: DataChannelOwner) -> Result<Self, ErrorPacket> {
+        let (initial_blk, initial_state) =
+            DataChannel::compute_initial_state(mode, owner);
+
+        let maybe_fd = if mode == DataChannelMode::Tx {
+            let fd = DataChannel::open_file_for_transmission(file_name, owner);
+            if let Err(ep) = fd {
+                return Err(ep);
+            }
+
+            Some(fd.unwrap())
+        } else {
+            let fp_valid = DataChannel::validate_file_for_reception(file_name, owner);
+            if let Err(ep) = fp_valid {
+                return Err(ep);
+            }
+
+            None
         };
 
-        if fd.is_err() {
-            return Err(ErrorPacket::new(TFTPError::FileNotFound));
-        }
-
         let mut channel = DataChannel {
-            fd: fd.unwrap(),
+            fd: maybe_fd,
+            file_name: file_name.to_string(),
             bytes: 0,
             blk: initial_blk,
             error: None,
             state: initial_state,
+            owner,
             packet_at_hand: None,
         };
 
+
         if channel.state == DataChannelState::SendData {
             channel.send_data();
-        } else {
-            // ACK for RRQ.
+        } else if channel.state == DataChannelState::SendAck {
             channel.send_ack();
         }
 
         Ok(channel)
+    }
+
+    fn compute_initial_state(channel_mode: DataChannelMode, channel_owner: DataChannelOwner) -> (u16, DataChannelState) {
+        match channel_mode {
+            DataChannelMode::Tx => {
+                if channel_owner == DataChannelOwner::Client {
+                    // An uploading client will be waiting for ACK #0
+                    (0, DataChannelState::WaitAck)
+                } else {
+                    // A server sending data will start with DATA #1
+                    // do_data() increases the block number anyways.
+                    (0, DataChannelState::SendData)
+                }
+            }
+            DataChannelMode::Rx => {
+                if channel_owner == DataChannelOwner::Client {
+                    // A downloading client will wait for DATA 1
+                    (1, DataChannelState::WaitData)
+                } else {
+                    // A server receiving data will be sending ACK 0.
+                    (0, DataChannelState::SendAck)
+                }
+            }
+        }
+    }
+
+    fn open_file_for_transmission(file_name: &str, owner: DataChannelOwner) -> Result<File, ErrorPacket> {
+        use std::fs;
+        let fp = Path::new(file_name);
+        let fd = File::open(fp)
+            .and_then(|fd| {
+                let meta = fs::metadata(fp).unwrap();
+                if meta.len() == 0 {
+                    let direction = if owner == DataChannelOwner::Server {
+                        "Requested"
+                    } else {
+                        "Transmitted"
+                    };
+                    let msg = format!("{} file is empty.", direction);
+                    Err(Error::new(ErrorKind::InvalidData, msg))
+                } else {
+                    Ok(fd)
+                }
+            });
+
+        if fd.is_err() {
+            let err = fd.unwrap_err();
+
+            return if err.kind() == ErrorKind::NotFound {
+                Err(ErrorPacket::new(TFTPError::FileNotFound))
+            } else {
+                Err(ErrorPacket::new_custom(err.to_string()))
+            };
+        }
+
+        Ok(fd.unwrap())
+    }
+
+    fn validate_file_for_reception(file_name: &str, owner: DataChannelOwner) -> Result<(), ErrorPacket> {
+        let path = Path::new(file_name);
+
+        if Path::exists(path) && owner == DataChannelOwner::Server {
+            return Err(ErrorPacket::new(TFTPError::FileExists));
+        }
+
+        if Path::file_name(path) == None || path.is_dir() {
+            let err = String::from("Can't write a directory");
+            return Err(ErrorPacket::new_custom(err));
+        }
+
+        // Client isn't allowed to traverse the TFTP directory upwards
+        // in any case.
+        if file_name.contains("..") {
+            let err = String::from("Only absolute paths are allowed.");
+            return Err(ErrorPacket::new_custom(err));
+        }
+
+        // Client needn't know anything about the server's host.
+        if path.is_absolute() {
+            let err = String::from("File path must not start with root.");
+            return Err(ErrorPacket::new_custom(err));
+        }
+
+        // File to be added is a decedent of the TFTP server directory.
+        if path.is_relative() && path.parent() != None {
+            use std::fs;
+            if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
+                return Err(ErrorPacket::new_custom(e.to_string()));
+            }
+        }
+
+        Ok(())
     }
 
     /// Receives a data packet and checks its block number,
@@ -96,18 +192,26 @@ impl DataChannel {
         assert_eq!(self.state, DataChannelState::WaitData);
         println!("ON_DATA #{:?}", dp.blk());
 
+        // The received blk
+        // is the awaited blk number.
         if (self.blk + 1) as u16 != dp.blk() {
             self.set_blk_error(dp.blk());
             return;
         }
 
+        // To avoid making empty files needlessly.
+        if dp.blk() == 1 {
+            let fp = Path::new(&self.file_name);
+            self.fd = Some(File::create(fp).unwrap());
+        }
+
         // The party the receives data, sets
         // its block number to ACK it on the
         // text transfer.
-        self.blk = dp.blk() as isize;
+        self.blk = dp.blk();
         let data = &dp.data();
         self.bytes += data.len();
-        self.fd.write_all(data).unwrap();
+        self.fd.as_ref().unwrap().write_all(data).unwrap();
 
         if data.len() == STRIDE_SIZE {
             self.set_state(DataChannelState::SendAck);
@@ -141,7 +245,7 @@ impl DataChannel {
         self.blk += 1;
 
         let mut buf = [0; STRIDE_SIZE];
-        let bytes_read = self.fd.read(&mut buf).unwrap();
+        let bytes_read = self.fd.as_ref().unwrap().read(&mut buf).unwrap();
         self.bytes += bytes_read;
 
         // When I read 0 bytes, this means that the client
@@ -164,6 +268,7 @@ impl DataChannel {
     /// validates the block number then sends
     /// the next data block.
     pub fn on_ack(&mut self, ap: AckPacket) {
+        println!("STATE: {:?}", self.state);
         assert!(
             self.state == DataChannelState::WaitAck || self.state == DataChannelState::WaitLastAck
         );
@@ -200,7 +305,11 @@ impl DataChannel {
             actual,
             self.blk + 1
         );
-        self.error = Some(err);
+        self.set_err(&err);
+    }
+
+    fn set_err(&mut self, msg: &str) {
+        self.error = Some(msg.to_string());
     }
 
     fn set_next_data(&mut self, packet: DataPacket) {

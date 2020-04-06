@@ -7,7 +7,7 @@
 /// a zero byte.
 use std::io::Write;
 
-use crate::tftp::shared::{Deserializable, Serializable, TFTPPacket, TFTPParseError, OP_ERR};
+use crate::tftp::shared::{Deserializable, OP_ERR, Serializable, TFTPPacket, TFTPParseError};
 
 use super::byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 
@@ -20,6 +20,7 @@ pub struct ErrorPacket {
     err: String,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum TFTPError {
     UndefinedError,
     FileNotFound,
@@ -34,30 +35,30 @@ fn get_err_by_code(code: u16) -> (TFTPError, String) {
     match code {
         0 => (
             TFTPError::UndefinedError,
-            String::from("Not defined, see error message (if any).\0"),
+            String::from("Not defined, see error message (if any)."),
         ),
-        1 => (TFTPError::FileNotFound, String::from("File not found.\0")),
+        1 => (TFTPError::FileNotFound, String::from("File not found.")),
         2 => (
             TFTPError::AccessViolation,
-            String::from("Access violation.\0"),
+            String::from("Access violation."),
         ),
         3 => (
             TFTPError::DiskFull,
-            String::from("Disk full or allocation exceeded.\0"),
+            String::from("Disk full or allocation exceeded."),
         ),
         4 => (
             TFTPError::IllegalOperation,
-            String::from("Illegal TFTP operation.\0"),
+            String::from("Illegal TFTP operation."),
         ),
         5 => (
             TFTPError::UnknownTID,
-            String::from("Unknown transfer ID.\0"),
+            String::from("Unknown transfer ID."),
         ),
         6 => (
             TFTPError::FileExists,
-            String::from("File already exists.\0"),
+            String::from("File already exists."),
         ),
-        _ => panic!(format!("Invalid error code [{}]", code)),
+        _ => (TFTPError::UndefinedError, String::new()),
     }
 }
 
@@ -83,6 +84,15 @@ impl ErrorPacket {
             op: OP_ERR,
             code,
             err: msg,
+        }
+    }
+
+    pub fn new_custom(err: String) -> Self {
+        let (code, _) = get_err_details(TFTPError::UndefinedError);
+        ErrorPacket {
+            op: OP_ERR,
+            code,
+            err,
         }
     }
 
@@ -129,6 +139,15 @@ impl Deserializable for ErrorPacket {
         let code = NetworkEndian::read_u16(&buf[2..]);
         let (err_type, _) = get_err_by_code(code);
 
+        if err_type == TFTPError::UndefinedError {
+            let buf = &buf[4..];
+            let len = buf.len();
+            let data = Vec::from(&buf[..len - 1]);   // Skip the \0
+            let err = String::from_utf8(data).unwrap();
+            let p = ErrorPacket::new_custom(err);
+            return Ok(TFTPPacket::ERR(p));
+        }
+
         let p = ErrorPacket::new(err_type);
         Ok(TFTPPacket::ERR(p))
     }
@@ -138,9 +157,9 @@ impl Deserializable for ErrorPacket {
 mod tests {
     use std::io::Write;
 
+    use crate::tftp::shared::{Deserializable, OP_ERR, Serializable, TFTPPacket};
+    use crate::tftp::shared::err_packet::{ErrorPacket, get_err_details};
     use crate::tftp::shared::err_packet::TFTPError::IllegalOperation;
-    use crate::tftp::shared::err_packet::{get_err_details, ErrorPacket};
-    use crate::tftp::shared::{Deserializable, Serializable, TFTPPacket, OP_ERR};
 
     use super::super::byteorder::{NetworkEndian, WriteBytesExt};
 
