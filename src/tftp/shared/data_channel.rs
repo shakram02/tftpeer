@@ -35,7 +35,7 @@ pub struct DataChannel {
     fd: Option<File>,
     file_name: String,
     file_size: u64,
-    transferred_bytes: usize,
+    last_transferred_bytes: usize,
     blk: u16,
     error: Option<String>,
     state: DataChannelState,
@@ -80,7 +80,7 @@ impl DataChannel {
             fd: maybe_fd,
             file_name: file_name.to_string(),
             file_size: size,
-            transferred_bytes: 0,
+            last_transferred_bytes: 0,
             blk: initial_blk,
             error: None,
             state: initial_state,
@@ -197,7 +197,6 @@ impl DataChannel {
     /// * `dp` - Data packet received from the other end.
     pub fn on_data(&mut self, dp: DataPacket) {
         assert_eq!(self.state, DataChannelState::WaitData);
-        println!("ON_DATA #{:?}", dp.blk());
 
         // The received blk
         // is the awaited blk number.
@@ -213,7 +212,7 @@ impl DataChannel {
         }
 
         let data = &dp.data();
-        self.transferred_bytes += data.len();
+        self.last_transferred_bytes += data.len();
         self.fd.as_ref().unwrap().write_all(data).unwrap();
 
         if data.len() == STRIDE_SIZE {
@@ -229,14 +228,9 @@ impl DataChannel {
         assert!(
             self.state == DataChannelState::SendAck || self.state == DataChannelState::SendLastAck
         );
-        println!("DO_ACK #{:?}", self.blk);
 
         self.set_next_ack(AckPacket::new(self.blk as u16));
         self.blk += 1;
-
-        if self.state == DataChannelState::SendAck {
-            self.set_state(DataChannelState::WaitData);
-        }
     }
 
     /// Reads the next data packet to be sent,
@@ -244,34 +238,11 @@ impl DataChannel {
     /// set to true.
     fn send_data(&mut self) {
         assert_eq!(self.state, DataChannelState::SendData);
-        println!("DO_DATA #{:?}", self.blk);
 
         let mut buf = [0; STRIDE_SIZE];
         let bytes_read = self.fd.as_ref().unwrap().read(&mut buf).unwrap();
+        self.last_transferred_bytes = bytes_read;
 
-        // When I read 0 bytes, this means that the client
-        // just sent the ack for the last chunk in the file.
-        if self.transferred_bytes >= self.file_size as usize {
-            if self.file_size % STRIDE_SIZE as u64 == 0 {
-                // Send 0-length Data packet
-                self.set_state(DataChannelState::WaitAck);
-                println!("FINAL: {}", self.transferred_bytes);
-                // Flag completion. to avoid entering this same state.
-                self.file_size -= 1;
-            } else {
-                self.set_state(DataChannelState::Done);
-                return; // Don't prepare any data packets, we're done.
-            }
-        } else if bytes_read < STRIDE_SIZE {
-            self.set_state(DataChannelState::WaitLastAck);
-        } else {
-            self.set_state(DataChannelState::WaitAck);
-        }
-
-        // Update transfer size when sending the
-        // packet to avoid having off by 1 error
-        // when checking termination conditions.
-        self.transferred_bytes += bytes_read;
         // Send the next data packet.
         let data = Vec::from(&buf[0..bytes_read]);
         self.set_next_data(DataPacket::new(self.blk as u16, data));
@@ -281,11 +252,9 @@ impl DataChannel {
     /// validates the block number then sends
     /// the next data block.
     pub fn on_ack(&mut self, ap: AckPacket) {
-        println!("STATE: {:?}", self.state);
         assert!(
             self.state == DataChannelState::WaitAck || self.state == DataChannelState::WaitLastAck
         );
-        println!("ON_ACK #{:?}", ap.blk());
 
         if self.blk as u16 != ap.blk() {
             self.set_blk_error(ap.blk());
@@ -306,8 +275,24 @@ impl DataChannel {
         }
     }
 
+    pub fn on_packet_sent(&mut self) {
+        match self.state {
+            // If the sent packet was SendLastAck,
+            // now we're done.
+            DataChannelState::SendLastAck => self.set_state(DataChannelState::Done),
+            DataChannelState::SendAck => self.set_state(DataChannelState::WaitData),
+            DataChannelState::SendData => {
+                if self.last_transferred_bytes < STRIDE_SIZE {
+                    self.set_state(DataChannelState::WaitLastAck);
+                } else {
+                    self.set_state(DataChannelState::WaitAck);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn set_state(&mut self, state: DataChannelState) {
-        println!("Moving to {:?}", state);
         self.state = state;
     }
 
@@ -328,7 +313,6 @@ impl DataChannel {
     }
 
     fn set_next_data(&mut self, packet: DataPacket) {
-        println!("DATA_AT_HAND #{}", packet.blk());
         self.set_packet(packet.serialize());
     }
 
@@ -345,11 +329,10 @@ impl DataChannel {
     }
 
     pub fn transfer_size(&self) -> usize {
-        self.transferred_bytes
+        self.last_transferred_bytes
     }
 
     pub fn is_done(&self) -> bool {
-        println!("STATE CHECK IN DONE: {:?}", self.state);
         self.state == DataChannelState::Done
     }
 
@@ -367,12 +350,6 @@ impl DataChannel {
 
     pub fn packet_at_hand(&mut self) -> Option<Vec<u8>> {
         assert_ne!(self.state, DataChannelState::Done);
-
-        // If the previous state was SendLastAck,
-        // now we're done.
-        if self.state == DataChannelState::SendLastAck {
-            self.set_state(DataChannelState::Done);
-        }
 
         match &self.packet_at_hand {
             None => None,

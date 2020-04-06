@@ -13,6 +13,7 @@ struct TFTPClient {
     packet_buffer: Option<Vec<u8>>,
     data_channel: DataChannel,
     error: Option<String>,
+    transfer_size: u64,
 }
 
 impl TFTPClient {
@@ -35,6 +36,7 @@ impl TFTPClient {
             packet_buffer: None,
             data_channel,
             error: None,
+            transfer_size: 0,
         }
     }
 
@@ -60,6 +62,8 @@ impl TFTPClient {
     /// Returns the first packet in the packet
     /// buffer to be sent to the server.
     pub fn get_next_packet(&mut self) -> Vec<u8> {
+        self.transfer_size += self.data_channel.transfer_size() as u64;
+
         let packet_at_hand = self.data_channel.packet_at_hand();
         if packet_at_hand.is_none() {
             // RRQ / WRQ are managed here.
@@ -79,14 +83,9 @@ impl TFTPClient {
     /// then acts accordingly.
     pub fn process_packet(&mut self, buf: &[u8]) {
         let packet = crate::tftp::shared::parse_udp_packet(&buf);
-        println!("PACKET: {:?}", packet);
         match packet {
             TFTPPacket::DATA(data) => {
                 self.data_channel.on_data(data);
-                println!(
-                    "Received [{}]",
-                    convert(self.data_channel.transfer_size() as f64)
-                );
             }
             TFTPPacket::ACK(ack) => {
                 self.data_channel.on_ack(ack);
@@ -96,6 +95,10 @@ impl TFTPClient {
         };
     }
 
+    pub fn on_packet_sent(&mut self) {
+        self.data_channel.on_packet_sent();
+    }
+
     /// Returns true if the client entered an error
     /// state.
     fn is_err(&self) -> bool {
@@ -103,8 +106,8 @@ impl TFTPClient {
     }
 
     /// Number of bytes transferred.
-    fn transferred_bytes(&self) -> usize {
-        self.data_channel.transfer_size()
+    fn transferred_bytes(&self) -> u64 {
+        self.transfer_size
     }
 
     /// Extracts the error message from the client.
@@ -154,7 +157,7 @@ pub fn client_main(server_address: &str, filename: &str, upload: bool) -> std::i
         let next_packet = &client.get_next_packet();
 
         sock.send_to(next_packet, server_address)?;
-        println!("[OUT]");
+        client.on_packet_sent();
 
         check_done(&client);    // Download ends here, when sending the last ACK.
         let (count, addr) = sock.recv_from(&mut buf)?;
@@ -167,7 +170,7 @@ pub fn client_main(server_address: &str, filename: &str, upload: bool) -> std::i
         server_address = addr.to_string();
 
         let raw_packet = &buf[..count];
-        println!("\n[IN]");
         client.process_packet(raw_packet);
+        check_done(&client);    // Upload ends here, when receiving the last ACK.
     }
 }

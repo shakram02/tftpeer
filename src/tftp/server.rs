@@ -45,6 +45,10 @@ impl TFTPServer {
         };
     }
 
+    pub fn on_packet_send(&mut self) {
+        self.data_channel.on_packet_sent();
+    }
+
     fn init_rrq_response(rrq: ReadRequestPacket) -> Result<TFTPServer, ErrorPacket> {
         DataChannel::new(rrq.filename(), DataChannelMode::Tx, DataChannelOwner::Server)
             .and_then(|data_channel| {
@@ -85,7 +89,7 @@ fn handle_client(socket: UdpSocket, mut server: TFTPServer, client_addr: SocketA
         let p = server.get_next_packet();
         println!("Sending #{} [{}]", server.blk(), convert(p.len() as f64));
         socket.send_to(&p, client_addr).unwrap();
-
+        server.on_packet_send();
         if server.done() {
             break;  // If we've just sent the last ack
         }
