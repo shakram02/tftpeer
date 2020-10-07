@@ -1,6 +1,7 @@
 extern crate pretty_bytes;
 
 use std::net::{SocketAddr, UdpSocket};
+use std::time::Duration;
 
 use async_std::task as asyncstd_task;
 use pretty_bytes::converter::convert;
@@ -9,6 +10,8 @@ use crate::tftp::shared::{parse_udp_packet, Serializable, TFTPPacket};
 use crate::tftp::shared::data_channel::{DataChannel, DataChannelMode, DataChannelOwner};
 use crate::tftp::shared::err_packet::{ErrorPacket, TFTPError};
 use crate::tftp::shared::request_packet::{ReadRequestPacket, Request, WriteRequestPacket};
+
+const sock_dur: Option<Duration> = Some(Duration::from_secs(5));
 
 /// A TFTP server that supports a single client.
 struct TFTPServer {
@@ -95,24 +98,29 @@ fn handle_client(socket: UdpSocket, mut server: TFTPServer, client_addr: SocketA
         }
 
         let mut buf = [0 as u8; 1024];
-        let (count, addr) = socket
-            .recv_from(&mut buf)
-            .expect("Failed to read socket fd");
-        let raw_msg = &buf[..count];
+        match socket.recv_from(&mut buf){
+            Ok((count, addr)) => {
+                let raw_msg = &buf[..count];
 
-        if addr != client_addr {
-            let error_packet = ErrorPacket::new(TFTPError::UnknownTID);
-            socket.send_to(&error_packet.serialize(), addr).unwrap();
+                if addr != client_addr {
+                    let error_packet = ErrorPacket::new(TFTPError::UnknownTID);
+                    socket.send_to(&error_packet.serialize(), addr).unwrap();
+                }
+
+                server.run(raw_msg);
+            },
+            Err(e) => {
+                eprintln!("Client connection error: {}", e);
+                break;
+            }
         }
-
-        server.run(raw_msg);
     }
-    // });
 }
 
 pub fn handle_new_client(client_addr: SocketAddr, rq_packet: &[u8]) {
     println!("New connection: {}", client_addr);
     let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket");
+    socket.set_read_timeout(sock_dur);
 
     match TFTPServer::new(rq_packet) {
         Ok(server) => {
